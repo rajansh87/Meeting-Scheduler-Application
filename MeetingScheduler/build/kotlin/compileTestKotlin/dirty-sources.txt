@@ -1,3 +1,0 @@
-/Users/anshraj.s/Desktop/my/FeedbackSystem/src/test/kotlin/com/example/demo/model/ResponseModelTest.kt
-/Users/anshraj.s/Desktop/my/FeedbackSystem/src/test/kotlin/com/example/demo/controller/ControllerTest.kt
-/Users/anshraj.s/Desktop/my/FeedbackSystem/src/test/kotlin/com/example/demo/service/ServiceTest.kt
