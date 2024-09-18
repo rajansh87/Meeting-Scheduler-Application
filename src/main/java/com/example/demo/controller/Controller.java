@@ -1,0 +1,66 @@
+package com.example.demo.controller;
+
+import com.example.demo.model.MeetingHistory;
+import com.example.demo.model.NotificationRequestBody;
+import com.example.demo.model.RequestedBody;
+import com.example.demo.service.Service;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.*;
+
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Optional;
+
+@RestController
+@RequestMapping("/api/meeting_scheduler/")
+public class Controller {
+
+    // Inject the feedback service
+    @Autowired
+    private Service service;
+
+    // API endpoint for retrieving all Data with pagination
+    @GetMapping
+    public ResponseEntity<List<Long>> findAvailableRooms(@RequestBody RequestedBody requestedBody) {
+        List<Long> available_rooms = service.find_available_rooms(requestedBody.getStartTime(), requestedBody.getEndTime());
+        return ResponseEntity.ok(available_rooms);
+    }
+
+    // API endpoint for creating new data
+    @PostMapping
+    public ResponseEntity<String> bookMeeting(@RequestBody RequestedBody requestedBody) {
+        return service.book_meeting(requestedBody);
+    }
+
+    // API endpoint for creating new data
+    @PostMapping("book_room/{roomId}")
+    public ResponseEntity<String> bookMeetingInSpecificRoom(@RequestBody RequestedBody requestedBody,@PathVariable("roomId")int roomId) {
+        return service.bookMeetingInSpecificRoom(requestedBody,(long)roomId);
+    }
+
+    @GetMapping("history/")
+    public List<MeetingHistory> getMeetingHistory(@RequestParam(defaultValue = "0") int page, @RequestParam(defaultValue = "20") int size) {
+        return service.get_meeting_history(page,size);
+    }
+
+    @GetMapping("meetings_on_day/")
+    public List<MeetingHistory> getAllMeetingsOnDate(@RequestParam(defaultValue = "0") String date, @RequestParam(defaultValue = "0") int page, @RequestParam(defaultValue = "20") int size) {
+        return service.getAllMeetingsOnDate(date,page,size);
+    }
+
+    @GetMapping("notifications/")
+    public ResponseEntity<ArrayList<String>> view_notifications(@RequestParam Optional<Long> empId) {
+        return service.view_notifications1(empId);
+    }
+
+    @GetMapping("notifications/v2/")
+    public ResponseEntity<List<Object>> view_notifications_v2(@RequestParam Optional<Long> empId) {
+        return service.view_notifications2(empId);
+    }
+
+    @PostMapping("send_notification/")
+    public ResponseEntity<String> sendNotification(@RequestBody NotificationRequestBody notificationRequestBody) {
+        return service.send_notificationToEmployee(notificationRequestBody.getEmpId(),notificationRequestBody.getNotification());
+    }
+}
