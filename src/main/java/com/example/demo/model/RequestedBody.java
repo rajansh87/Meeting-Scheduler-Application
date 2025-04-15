@@ -49,4 +49,13 @@ public class RequestedBody {
         this.endTime = endTime;
     }
 
+    @Override
+    public String toString() {
+        return "RequestedBody{" +
+                "id=" + id +
+                ", startTime=" + startTime +
+                ", endTime=" + endTime +
+                ", invitees=" + invitees +
+                '}';
+    }
 }
