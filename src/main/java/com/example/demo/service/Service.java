@@ -60,10 +60,10 @@ public class Service {
             roomRepository.save(new Room(12L,"Meeting Room B"));
             roomRepository.save(new Room(13L,"Meeting Room C"));
             roomRepository.save(new Room(14L,"Meeting Room D"));
-            employeeRepository.save(new Employee(101L,"Employee A","EmailA","ContactA"));
-            employeeRepository.save(new Employee(102L,"Employee B","EmailB","ContactB"));
-            employeeRepository.save(new Employee(103L,"Employee C","EmailC","ContactC"));
-            employeeRepository.save(new Employee(104L,"Employee D","EmailD","ContactD"));
+            employeeRepository.save(new Employee(101L,"Employee_A","EmailA","ContactA"));
+            employeeRepository.save(new Employee(102L,"Employee_B","EmailB","ContactB"));
+            employeeRepository.save(new Employee(103L,"Employee_C","EmailC","ContactC"));
+            employeeRepository.save(new Employee(104L,"Employee_D","EmailD","ContactD"));
 
             // Flush changes to the database
             roomRepository.flush();
@@ -85,7 +85,7 @@ public class Service {
 
     public void createEmployees(int n) {
         for (int i = 1; i <= n; i++) {
-            employeeRepository.save(new Employee((long)i+100,"Employee "+i,"Email "+i,"Contact "+i));
+            employeeRepository.save(new Employee((long)i+100,"Employee_"+i,"Email_"+i,"Contact_"+i));
         }
     }
 
@@ -357,7 +357,5 @@ public class Service {
             meetingsRepository.deleteById(meeting_id);
             System.out.println("Meeting with ID: "+ meeting_id +" deleted successfully");
         });
-
     }
-
 }
