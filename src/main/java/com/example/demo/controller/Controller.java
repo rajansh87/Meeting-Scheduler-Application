@@ -37,8 +37,9 @@ public class Controller {
 
     // API endpoint for creating new data
     @PostMapping
-    public ResponseEntity<String> bookMeeting(@RequestBody RequestedBody requestedBody) {
-        return service.book_meeting(requestedBody);
+    public ResponseEntity<String> bookMeeting(@RequestBody RequestedBody requestedBody,
+                                              @RequestHeader("Idempotency-Key") String idempotencyKey) {
+        return service.book_meeting(requestedBody, idempotencyKey);
     }
 
     // API endpoint for creating new data
@@ -78,6 +79,6 @@ public class Controller {
         String geminiRawResponse = aiService.callGeminiAPI(userInput);
         RequestedBody bookingDetails = aiService.parseGeminiResponse(geminiRawResponse);
         System.out.println("Gemini AI Response converted to rb " + bookingDetails.toString());
-        return service.book_meeting(bookingDetails);
+        return service.book_meeting(bookingDetails, "");
     }
 }
