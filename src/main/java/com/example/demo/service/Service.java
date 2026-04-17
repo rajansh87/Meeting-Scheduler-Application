@@ -10,6 +10,7 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.RequestHeader;
 
 import javax.annotation.PostConstruct;
 import javax.transaction.Transactional;
@@ -19,6 +20,7 @@ import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.time.ZonedDateTime;
 import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Collectors;
 
 @org.springframework.stereotype.Service
@@ -42,8 +44,21 @@ public class Service {
     @Autowired
     private WebClientService webClientService;
 
+
     public HashMap<Long,ArrayList<String>> meetingNotifications = new HashMap<Long,ArrayList<String>>();
     public Integer notificationQueueSize = 10;
+
+    // roomLocks: A ConcurrentHashMap that holds locks for each room. The key is the room ID,
+    // and the value is an Object that serves as a lock for that room.
+    // This allows us to synchronize access to booking operations on a per-room basis
+    private final ConcurrentHashMap<Long, Object> roomLocks = new ConcurrentHashMap<>();
+
+    // idempotencyMap: A ConcurrentHashMap that stores the results of booking operations based on a unique idempotency key.
+    private final ConcurrentHashMap<String, Meetings> idempotencyMap = new ConcurrentHashMap<>();
+
+    // rateLimiter: An instance of the RateLimiter class that limits the number of requests
+    // that can be made to certain operations within a specified time window (5 requests per minute in this case).
+    private final RateLimiter rateLimiter = new RateLimiter(5, 60_000); // 5 req per minute
 
     @Transactional
     @PostConstruct
@@ -134,42 +149,130 @@ public class Service {
         return Timestamp.from(utcZonedDateTime.toInstant());
     }
 
-    public Meetings book_room(Long roomId, Timestamp startTime, Timestamp endTime, Set<Employee> invitees){
-        Room room = roomRepository.getById(roomId);
-        Timestamp newStartTime = convertTimeToIST(startTime);
-        Timestamp newEndTime = convertTimeToIST(endTime);
-        Meetings meetings = new Meetings();
-        meetings.setRoom(room);
-        meetings.setStartTime(newStartTime);
-        meetings.setEndTime(newEndTime);
-        meetings.setInvitees(invitees);
-        meetings.setDate(extractDateFromTimeStamp(newStartTime));
-        Meetings newMeetings = meetingsRepository.save(meetings);
+//    depreciated this method as it is not thread safe and can lead to race conditions like
+//    double booking of rooms when multiple requests are made for the same room at the same time.
+//    The method does not have any synchronization mechanism to handle concurrent access to the
+//    shared resource (room booking), which can result in inconsistent state and data integrity issues
+//    in a multi-threaded environment.
+//    public Meetings book_room(Long roomId, Timestamp startTime, Timestamp endTime, Set<Employee> invitees){
+//        Room room = roomRepository.getById(roomId);
+//        Timestamp newStartTime = convertTimeToIST(startTime);
+//        Timestamp newEndTime = convertTimeToIST(endTime);
+//        Meetings meetings = new Meetings();
+//        meetings.setRoom(room);
+//        meetings.setStartTime(newStartTime);
+//        meetings.setEndTime(newEndTime);
+//        meetings.setInvitees(invitees);
+//        meetings.setDate(extractDateFromTimeStamp(newStartTime));
+//        Meetings newMeetings = meetingsRepository.save(meetings);
+//
+//        MeetingHistory meetingHistory = new MeetingHistory();
+//        meetingHistory.setMeetingId(newMeetings.getId());
+//        meetingHistory.setStartTime(startTime);
+//        meetingHistory.setEndTime(endTime);
+//        meetingHistoryRepository.save(meetingHistory);
+//        send_invitation(newMeetings);
+//        return newMeetings;
+//    }
 
-        MeetingHistory meetingHistory = new MeetingHistory();
-        meetingHistory.setMeetingId(newMeetings.getId());
-        meetingHistory.setStartTime(startTime);
-        meetingHistory.setEndTime(endTime);
-        meetingHistoryRepository.save(meetingHistory);
-        send_invitation(newMeetings);
-        return newMeetings;
+    public Meetings book_room(Long roomId, Timestamp startTime, Timestamp endTime, Set<Employee> invitees){
+
+        Object lock = roomLocks.computeIfAbsent(roomId, k -> new Object());
+
+        synchronized (lock) {
+
+            // 🔥 RE-CHECK inside lock (critical)
+            ArrayList<Meetings> conflicts = meetingsRepository.findAllOverlappingMeetingsInRoom(
+                    roomId, startTime, endTime);
+
+            if (!conflicts.isEmpty()) {
+                throw new RuntimeException("Room already booked for this slot");
+            }
+
+            Room room = roomRepository.getById(roomId);
+
+            Timestamp newStartTime = convertTimeToIST(startTime);
+            Timestamp newEndTime = convertTimeToIST(endTime);
+
+            Meetings meetings = new Meetings();
+            meetings.setRoom(room);
+            meetings.setStartTime(newStartTime);
+            meetings.setEndTime(newEndTime);
+            meetings.setInvitees(invitees);
+            meetings.setDate(extractDateFromTimeStamp(newStartTime));
+
+            Meetings newMeetings = meetingsRepository.save(meetings);
+
+            MeetingHistory meetingHistory = new MeetingHistory();
+            meetingHistory.setMeetingId(newMeetings.getId());
+            meetingHistory.setStartTime(startTime);
+            meetingHistory.setEndTime(endTime);
+            meetingHistoryRepository.save(meetingHistory);
+
+            send_invitation(newMeetings);
+
+            return newMeetings;
+        }
     }
 
-    public ResponseEntity<String> book_meeting(RequestedBody requestedBody){
-        ArrayList<Long> available_rooms= find_available_rooms(requestedBody.getStartTime(),requestedBody.getEndTime());
-        if(available_rooms.isEmpty()){
-            return ResponseEntity.ok("No Room available for Meeting");
-        }
-        ArrayList<Long> invitees = requestedBody.getInvitees();
-        Set<Employee> inviteesSet = new HashSet<>();
+//    depreciated this method as it does not handle idempotency and can lead to duplicate bookings
+//    when the same request is sent multiple times due to network issues or client retries.
+//    The method does not have any mechanism to identify and ignore duplicate requests,
+//    which can result in multiple bookings for the same meeting details, causing confusion and resource conflicts.
+//    public ResponseEntity<String> book_meeting(RequestedBody requestedBody){
+//        ArrayList<Long> available_rooms= find_available_rooms(requestedBody.getStartTime(),requestedBody.getEndTime());
+//        if(available_rooms.isEmpty()){
+//            return ResponseEntity.ok("No Room available for Meeting");
+//        }
+//        ArrayList<Long> invitees = requestedBody.getInvitees();
+//        Set<Employee> inviteesSet = new HashSet<>();
+//
+//        for (Long empId : invitees) {
+//            Employee invitee = employeeRepository.getById(empId);
+//            inviteesSet.add(invitee);
+//        }
+//        book_room(available_rooms.get(0),requestedBody.getStartTime(),requestedBody.getEndTime(),inviteesSet);
+//        return ResponseEntity.ok(String.format("Meeting Booked successfully in Room %d for Timeslot %s to %s",
+//                available_rooms.get(0), requestedBody.getStartTime().toString(), requestedBody.getEndTime().toString()));
+//    }
 
-        for (Long empId : invitees) {
-            Employee invitee = employeeRepository.getById(empId);
-            inviteesSet.add(invitee);
+    public ResponseEntity<String> book_meeting(RequestedBody requestedBody, String idempotencyKey){
+
+        String userKey = requestedBody.getInvitees().get(0).toString(); // or use empId / userId
+        if (!rateLimiter.allowRequest(userKey)) {
+            return ResponseEntity.status(429).body("Rate limit exceeded. Try again later.");
         }
-        book_room(available_rooms.get(0),requestedBody.getStartTime(),requestedBody.getEndTime(),inviteesSet);
-        return ResponseEntity.ok(String.format("Meeting Booked successfully in Room %d for Timeslot %s to %s",
-                available_rooms.get(0), requestedBody.getStartTime().toString(), requestedBody.getEndTime().toString()));
+
+        Meetings meeting = idempotencyMap.computeIfAbsent(idempotencyKey, key -> {
+
+            ArrayList<Long> available_rooms = find_available_rooms(
+                    requestedBody.getStartTime(),
+                    requestedBody.getEndTime()
+            );
+
+            if (available_rooms.isEmpty()) {
+                throw new RuntimeException("No Room available");
+            }
+
+            Set<Employee> inviteesSet = requestedBody.getInvitees()
+                    .stream()
+                    .map(empId -> employeeRepository.getById(empId))
+                    .collect(Collectors.toSet());
+
+            return book_room(
+                    available_rooms.get(0),
+                    requestedBody.getStartTime(),
+                    requestedBody.getEndTime(),
+                    inviteesSet
+            );
+        });
+
+        return ResponseEntity.ok(
+                String.format("Meeting Booked successfully in Room %d for Timeslot %s to %s",
+                        meeting.getRoom().getId(),
+                        meeting.getStartTime(),
+                        meeting.getEndTime())
+        );
     }
 
     public ResponseEntity<String> bookMeetingInSpecificRoom(RequestedBody requestedBody, Long roomId){
@@ -235,6 +338,7 @@ public class Service {
             System.out.println("Notification Send 3 to Invitees for Meeting: "+meeting_id);
             send_notification4(empId,notification);
             System.out.println("Notification Send 4 to Invitees for Meeting: "+meeting_id);
+
         }
     }
 
@@ -357,5 +461,7 @@ public class Service {
             meetingsRepository.deleteById(meeting_id);
             System.out.println("Meeting with ID: "+ meeting_id +" deleted successfully");
         });
+
     }
+
 }
